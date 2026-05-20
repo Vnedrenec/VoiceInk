@@ -1,0 +1,110 @@
+name: Build VoiceInk
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create a release with the built app'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select latest Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.app || \
+            sudo xcode-select -s "$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)" || \
+            sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          cmake --version
+          git --version
+
+      - name: Cache whisper.cpp xcframework
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: ~/VoiceInk-Dependencies
+          key: whisper-xcframework-${{ runner.os }}-${{ hashFiles('Makefile') }}-v1
+          restore-keys: |
+            whisper-xcframework-${{ runner.os }}-
+
+      - name: Build whisper.xcframework (if not cached)
+        if: steps.cache-whisper.outputs.cache-hit != 'true'
+        run: make whisper
+
+      - name: Build VoiceInk.app
+        run: make local
+
+      - name: Verify built app
+        run: |
+          APP=~/Downloads/VoiceInk.app
+          if [ ! -d "$APP" ]; then echo "App not found"; exit 1; fi
+          codesign -dvv "$APP" 2>&1 | head -10
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" ~/Downloads/VoiceInk.app/Contents/Info.plist)
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v${VERSION}-${SHA}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Package app
+        run: |
+          cd ~/Downloads
+          ditto -c -k --sequesterRsrc --keepParent VoiceInk.app VoiceInk-${{ steps.version.outputs.tag }}.zip
+          ls -la VoiceInk-${{ steps.version.outputs.tag }}.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceInk-${{ steps.version.outputs.tag }}
+          path: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+          retention-days: 30
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: VoiceInk ${{ steps.version.outputs.tag }}
+          body: |
+            Self-built VoiceInk from fork (ad-hoc signed, no trial system).
+
+            **Install:**
+            1. Download `VoiceInk-${{ steps.version.outputs.tag }}.zip`
+            2. Unzip, move `VoiceInk.app` to `/Applications/`
+            3. Run: `xattr -cr /Applications/VoiceInk.app`
+            4. Open. Grant Accessibility + Input Monitoring + Microphone in System Settings.
+
+            Built from commit ${{ steps.version.outputs.sha }} on ${{ github.ref_name }}.
+            Apple Silicon only (arm64).
+          files: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+          generate_release_notes: false
+          draft: false
+          prerelease: false
