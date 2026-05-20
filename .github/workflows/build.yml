@@ -53,6 +53,15 @@ jobs:
           echo "Patched MARKETING_VERSION to ${VERSION}"
           grep -n "MARKETING_VERSION" "$PBX" | sort -u
 
+      - name: Point Sparkle to fork-hosted appcast and public key
+        run: |
+          PLIST=VoiceInk/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://vnedrenec.github.io/VoiceInk/appcast.xml" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey 7P7jJss2WWW9NcEcTI4ygMLLVrJJ+lSnD/Sy8I7h2PQ=" "$PLIST"
+          echo "--- Sparkle keys in Info.plist ---"
+          /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$PLIST"
+
       - name: Cache whisper.cpp xcframework
         id: cache-whisper
         uses: actions/cache@v4
@@ -103,6 +112,27 @@ jobs:
           path: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
           retention-days: 30
 
+      - name: Sign update with Sparkle EdDSA key
+        if: startsWith(github.ref, 'refs/tags/')
+        id: sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SIGN=.local-build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update
+          if [ ! -x "$SIGN" ]; then echo "sign_update not found at $SIGN"; exit 1; fi
+          KEYFILE="$RUNNER_TEMP/sparkle.key"
+          umask 077
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEYFILE"
+          ZIP=~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+          OUTPUT=$("$SIGN" --ed-key-file "$KEYFILE" -p "$ZIP")
+          rm -f "$KEYFILE"
+          echo "sign output: $OUTPUT"
+          # Output looks like: sparkle:edSignature="..." length="123456"
+          SIG=$(echo "$OUTPUT" | sed -E 's/.*sparkle:edSignature="([^"]+)".*/\1/')
+          LEN=$(echo "$OUTPUT" | sed -E 's/.*length="([^"]+)".*/\1/')
+          echo "signature=$SIG" >> "$GITHUB_OUTPUT"
+          echo "length=$LEN" >> "$GITHUB_OUTPUT"
+
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/') || inputs.release == true
         uses: softprops/action-gh-release@v2
@@ -118,9 +148,71 @@ jobs:
             3. Run: `xattr -cr /Applications/VoiceInk.app`
             4. Open. Grant Accessibility + Input Monitoring + Microphone in System Settings.
 
+            Future updates: the app's "Check for Updates" reads
+            https://vnedrenec.github.io/VoiceInk/appcast.xml and installs
+            new releases automatically once a new tag is pushed.
+
             Built from commit ${{ steps.version.outputs.sha }} on ${{ github.ref_name }}.
             Apple Silicon only (arm64).
           files: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
           generate_release_notes: false
           draft: false
           prerelease: false
+
+      - name: Update appcast.xml on gh-pages
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SIG: ${{ steps.sign.outputs.signature }}
+          LEN: ${{ steps.sign.outputs.length }}
+        run: |
+          URL="https://github.com/Vnedrenec/VoiceInk/releases/download/${TAG}/VoiceInk-${TAG}.zip"
+          PUBDATE=$(date -R)
+
+          git clone --branch gh-pages --single-branch \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Vnedrenec/VoiceInk.git" gh-pages-checkout
+          cd gh-pages-checkout
+
+          export URL PUBDATE
+          /usr/bin/python3 - <<'PY'
+          import os, pathlib
+          version  = os.environ['VERSION']
+          sig      = os.environ['SIG']
+          length   = os.environ['LEN']
+          url      = os.environ['URL']
+          pubdate  = os.environ['PUBDATE']
+
+          item = (
+              '        <item>\n'
+              f'            <title>{version}</title>\n'
+              f'            <pubDate>{pubdate}</pubDate>\n'
+              f'            <sparkle:version>{version}</sparkle:version>\n'
+              f'            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>\n'
+              '            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>\n'
+              f'            <enclosure url="{url}" length="{length}" type="application/octet-stream" sparkle:edSignature="{sig}"/>\n'
+              '        </item>\n'
+          )
+
+          p = pathlib.Path('appcast.xml')
+          xml = p.read_text()
+          if f'<title>{version}</title>' in xml:
+              print(f'version {version} already in appcast, skipping')
+          else:
+              xml = xml.replace('    </channel>', item + '    </channel>')
+              p.write_text(xml)
+              print(f'appcast.xml updated with {version}')
+          PY
+
+          echo "--- updated appcast.xml ---"
+          cat appcast.xml
+
+          git config user.email actions@github.com
+          git config user.name github-actions
+          git add appcast.xml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "appcast: publish ${TAG}"
+            git push origin gh-pages
+          fi
