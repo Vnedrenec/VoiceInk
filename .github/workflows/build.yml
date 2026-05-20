@@ -140,21 +140,44 @@ jobs:
           tag_name: ${{ steps.version.outputs.tag }}
           name: VoiceInk ${{ steps.version.outputs.tag }}
           body: |
-            Self-built VoiceInk from fork (ad-hoc signed, no trial system).
+            VoiceInk ${{ steps.version.outputs.tag }} — Apple Silicon (arm64) only.
 
-            **Install:**
-            1. Download `VoiceInk-${{ steps.version.outputs.tag }}.zip`
-            2. Unzip, move `VoiceInk.app` to `/Applications/`
-            3. Run: `xattr -cr /Applications/VoiceInk.app`
-            4. Open. Grant Accessibility + Input Monitoring + Microphone in System Settings.
+            ## Установка одной командой (рекомендуется)
 
-            Future updates: the app's "Check for Updates" reads
-            https://vnedrenec.github.io/VoiceInk/appcast.xml and installs
-            new releases automatically once a new tag is pushed.
+            Открой Terminal и вставь:
 
-            Built from commit ${{ steps.version.outputs.sha }} on ${{ github.ref_name }}.
-            Apple Silicon only (arm64).
-          files: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+            ```bash
+            curl -sL https://github.com/Vnedrenec/VoiceInk/releases/latest/download/install.sh | bash
+            ```
+
+            Скрипт скачает, снимет карантин, поставит в `/Applications` и запустит. Без предупреждений Gatekeeper.
+
+            ## Ручная установка
+
+            1. Скачай `VoiceInk-${{ steps.version.outputs.tag }}.zip` ниже
+            2. Распакуй и перетащи `VoiceInk.app` в `/Applications`
+            3. **Ctrl+Click** на `VoiceInk.app` → **Open** → подтверди
+               (macOS покажет предупреждение про "невозможно подтвердить" — это потому что подпись ad-hoc, а не Apple Developer ID. Код открыт, проверяемо: [исходники](https://github.com/Vnedrenec/VoiceInk), [сборка в Actions](https://github.com/Vnedrenec/VoiceInk/actions))
+            4. Выдай разрешения в System Settings → Privacy & Security:
+               - **Microphone** (запись голоса)
+               - **Accessibility** (вставка в курсор)
+               - **Input Monitoring** (глобальный шорткат)
+
+            ## Будущие обновления
+
+            Через меню VoiceInk → "Check for Updates..." — автоматически, **без предупреждений Gatekeeper**. Sparkle качает прямо из этого репо.
+
+            ## Что в форке
+
+            - Убрано trial-сообщение в выводе расшифровки
+            - Отключены phone-home запросы (announcements, auto-update check к upstream)
+            - Auto-update перенаправлен на этот форк
+            - Все фичи upstream сохранены (Whisper/Parakeet локально, Power Mode, Enhancement, etc.)
+
+            Build SHA: `${{ steps.version.outputs.sha }}` · Tag: `${{ github.ref_name }}`
+          files: |
+            ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+            scripts/install.sh
           generate_release_notes: false
           draft: false
           prerelease: false
