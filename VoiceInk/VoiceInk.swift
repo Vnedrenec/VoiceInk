@@ -301,9 +301,11 @@ struct VoiceInkApp: App {
                             return
                         }
 
+                        #if !LOCAL_BUILD
                         if enableAnnouncements {
                             AnnouncementsService.shared.start()
                         }
+                        #endif
 
                         // Start the automatic audio cleanup process only if transcript cleanup is not enabled
                         if !UserDefaults.standard.bool(forKey: "IsTranscriptionCleanupEnabled") {
@@ -400,6 +402,10 @@ class UpdaterViewModel: ObservableObject {
 
     init() {
         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+
+        #if LOCAL_BUILD
+        updaterController.updater.automaticallyChecksForUpdates = false
+        #endif
 
         automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
 
