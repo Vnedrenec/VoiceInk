@@ -4,13 +4,5 @@
         <title>VoiceInk Fork (Vnedrenec)</title>
         <description>Private-patched self-built VoiceInk releases</description>
         <language>en</language>
-        <item>
-            <title>1.77.4</title>
-            <pubDate>Wed, 20 May 2026 11:44:00 +0000</pubDate>
-            <sparkle:version>1.77.4</sparkle:version>
-            <sparkle:shortVersionString>1.77.4</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Vnedrenec/VoiceInk/releases/download/v1.77.4/VoiceInk-v1.77.4.zip" length="+frhiIeWlcZYbMhlFcOU9pzr7kC47N/p1CPL8UNXf7hNW37haKdgw4qCakCPYRVN3PZJfs3KYi+XdkTETi0aCA==" type="application/octet-stream" sparkle:edSignature="+frhiIeWlcZYbMhlFcOU9pzr7kC47N/p1CPL8UNXf7hNW37haKdgw4qCakCPYRVN3PZJfs3KYi+XdkTETi0aCA=="/>
-        </item>
-    </channel>
+</channel>
 </rss>
