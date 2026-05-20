@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import AppKit
 import os
 
 /// Handles the full post-recording pipeline:
