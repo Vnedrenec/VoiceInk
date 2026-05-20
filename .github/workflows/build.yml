@@ -124,12 +124,12 @@ jobs:
           umask 077
           printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEYFILE"
           ZIP=~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
-          OUTPUT=$("$SIGN" --ed-key-file "$KEYFILE" -p "$ZIP")
+          # -p prints only the EdDSA signature
+          SIG=$("$SIGN" --ed-key-file "$KEYFILE" -p "$ZIP")
           rm -f "$KEYFILE"
-          echo "sign output: $OUTPUT"
-          # Output looks like: sparkle:edSignature="..." length="123456"
-          SIG=$(echo "$OUTPUT" | sed -E 's/.*sparkle:edSignature="([^"]+)".*/\1/')
-          LEN=$(echo "$OUTPUT" | sed -E 's/.*length="([^"]+)".*/\1/')
+          LEN=$(stat -f%z "$ZIP")
+          echo "signature length: ${#SIG} chars"
+          echo "file length: $LEN bytes"
           echo "signature=$SIG" >> "$GITHUB_OUTPUT"
           echo "length=$LEN" >> "$GITHUB_OUTPUT"
 
