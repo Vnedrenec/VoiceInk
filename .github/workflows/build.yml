@@ -1,0 +1,263 @@
+name: Build VoiceInk
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Create a release with the built app'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode with Swift 6.2+
+        run: |
+          # LLMkit requires Swift 6.2 -> need Xcode 26.x
+          for candidate in /Applications/Xcode_26*.app /Applications/Xcode.app; do
+            if [ -d "$candidate" ]; then
+              sudo xcode-select -s "$candidate"
+              break
+            fi
+          done
+          xcodebuild -version
+          swift --version
+          xcode-select -p
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          cmake --version
+          git --version
+
+      - name: Sync MARKETING_VERSION and CURRENT_PROJECT_VERSION with git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: versions
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PBX=VoiceInk.xcodeproj/project.pbxproj
+
+          # Build number for Sparkle comparison: turn "1.77.7" into a strictly
+          # monotonic integer "1007707" — Sparkle's standard comparator compares
+          # CFBundleVersion when sparkle:version is omitted from the appcast
+          # entry. Identical CFBundleVersion = "no update available" even when
+          # the display version differs, which is exactly the bug from v1.77.6
+          # -> v1.77.7. Padding each segment to 2 digits keeps the ordering
+          # numeric and supports 0..99 for each component.
+          BUILD=$(echo "$VERSION" | awk -F. '{ printf "%d%02d%02d\n", $1, $2+0, $3+0 }')
+
+          # Replace only the VoiceInk app target's MARKETING_VERSION (current: 1.77).
+          # The test target has MARKETING_VERSION = 1.0 and is left alone.
+          sed -i '' "s|MARKETING_VERSION = 1\.77;|MARKETING_VERSION = ${VERSION};|g" "$PBX"
+
+          # Replace the VoiceInk app target's CURRENT_PROJECT_VERSION (current: 177).
+          # The test target has CURRENT_PROJECT_VERSION = 1 and is left alone.
+          sed -i '' "s|CURRENT_PROJECT_VERSION = 177;|CURRENT_PROJECT_VERSION = ${BUILD};|g" "$PBX"
+
+          echo "Patched MARKETING_VERSION -> ${VERSION}, CURRENT_PROJECT_VERSION -> ${BUILD}"
+          grep -n "MARKETING_VERSION\|CURRENT_PROJECT_VERSION" "$PBX" | sort -u
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+
+      - name: Point Sparkle to fork-hosted appcast and public key
+        run: |
+          PLIST=VoiceInk/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :SUFeedURL https://vnedrenec.github.io/VoiceInk/appcast.xml" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :SUPublicEDKey 7P7jJss2WWW9NcEcTI4ygMLLVrJJ+lSnD/Sy8I7h2PQ=" "$PLIST"
+          echo "--- Sparkle keys in Info.plist ---"
+          /usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$PLIST"
+
+      - name: Cache whisper.cpp xcframework
+        id: cache-whisper
+        uses: actions/cache@v4
+        with:
+          path: ~/VoiceInk-Dependencies
+          key: whisper-xcframework-${{ runner.os }}-${{ hashFiles('Makefile') }}-v1
+          restore-keys: |
+            whisper-xcframework-${{ runner.os }}-
+
+      - name: Build whisper.xcframework (if not cached)
+        if: steps.cache-whisper.outputs.cache-hit != 'true'
+        run: make whisper
+
+      - name: Build VoiceInk.app
+        run: make local
+
+      - name: Verify built app
+        run: |
+          APP=~/Downloads/VoiceInk.app
+          if [ ! -d "$APP" ]; then echo "App not found"; exit 1; fi
+          codesign -dvv "$APP" 2>&1 | head -10
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" ~/Downloads/VoiceInk.app/Contents/Info.plist)
+          SHA=$(git rev-parse --short HEAD)
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v${VERSION}-${SHA}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Package app
+        run: |
+          cd ~/Downloads
+          ditto -c -k --sequesterRsrc --keepParent VoiceInk.app VoiceInk-${{ steps.version.outputs.tag }}.zip
+          ls -la VoiceInk-${{ steps.version.outputs.tag }}.zip
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VoiceInk-${{ steps.version.outputs.tag }}
+          path: ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+          retention-days: 30
+
+      - name: Sign update with Sparkle EdDSA key
+        if: startsWith(github.ref, 'refs/tags/')
+        id: sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SIGN=.local-build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update
+          if [ ! -x "$SIGN" ]; then echo "sign_update not found at $SIGN"; exit 1; fi
+          KEYFILE="$RUNNER_TEMP/sparkle.key"
+          umask 077
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEYFILE"
+          ZIP=~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+          # -p prints only the EdDSA signature
+          SIG=$("$SIGN" --ed-key-file "$KEYFILE" -p "$ZIP")
+          rm -f "$KEYFILE"
+          LEN=$(stat -f%z "$ZIP")
+          echo "signature length: ${#SIG} chars"
+          echo "file length: $LEN bytes"
+          echo "signature=$SIG" >> "$GITHUB_OUTPUT"
+          echo "length=$LEN" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.release == true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: VoiceInk ${{ steps.version.outputs.tag }}
+          body: |
+            VoiceInk ${{ steps.version.outputs.tag }} — Apple Silicon (arm64) only.
+
+            ## Установка одной командой (рекомендуется)
+
+            Открой Terminal и вставь:
+
+            ```bash
+            curl -sL https://github.com/Vnedrenec/VoiceInk/releases/latest/download/install.sh | bash
+            ```
+
+            Скрипт скачает, снимет карантин, поставит в `/Applications` и запустит. Без предупреждений Gatekeeper.
+
+            ## Ручная установка
+
+            1. Скачай `VoiceInk-${{ steps.version.outputs.tag }}.zip` ниже
+            2. Распакуй и перетащи `VoiceInk.app` в `/Applications`
+            3. **Ctrl+Click** на `VoiceInk.app` → **Open** → подтверди
+               (macOS покажет предупреждение про "невозможно подтвердить" — это потому что подпись ad-hoc, а не Apple Developer ID. Код открыт, проверяемо: [исходники](https://github.com/Vnedrenec/VoiceInk), [сборка в Actions](https://github.com/Vnedrenec/VoiceInk/actions))
+            4. Выдай разрешения в System Settings → Privacy & Security:
+               - **Microphone** (запись голоса)
+               - **Accessibility** (вставка в курсор)
+               - **Input Monitoring** (глобальный шорткат)
+
+            ## Будущие обновления
+
+            Через меню VoiceInk → "Check for Updates..." — автоматически, **без предупреждений Gatekeeper**. Sparkle качает прямо из этого репо.
+
+            ## Что в форке
+
+            - Убрано trial-сообщение в выводе расшифровки
+            - Отключены phone-home запросы (announcements, auto-update check к upstream)
+            - Auto-update перенаправлен на этот форк
+            - Все фичи upstream сохранены (Whisper/Parakeet локально, Power Mode, Enhancement, etc.)
+
+            Build SHA: `${{ steps.version.outputs.sha }}` · Tag: `${{ github.ref_name }}`
+          files: |
+            ~/Downloads/VoiceInk-${{ steps.version.outputs.tag }}.zip
+            scripts/install.sh
+          generate_release_notes: false
+          draft: false
+          prerelease: false
+
+      - name: Update appcast.xml on gh-pages
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD: ${{ steps.versions.outputs.build }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SIG: ${{ steps.sign.outputs.signature }}
+          LEN: ${{ steps.sign.outputs.length }}
+        run: |
+          URL="https://github.com/Vnedrenec/VoiceInk/releases/download/${TAG}/VoiceInk-${TAG}.zip"
+          PUBDATE=$(date -R)
+
+          git clone --branch gh-pages --single-branch \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Vnedrenec/VoiceInk.git" gh-pages-checkout
+          cd gh-pages-checkout
+
+          export URL PUBDATE
+          /usr/bin/python3 - <<'PY'
+          import os, pathlib
+          version  = os.environ['VERSION']
+          build    = os.environ['BUILD']
+          sig      = os.environ['SIG']
+          length   = os.environ['LEN']
+          url      = os.environ['URL']
+          pubdate  = os.environ['PUBDATE']
+
+          # sparkle:version MUST match CFBundleVersion (build number, integer)
+          # for Sparkle's comparator to detect updates. sparkle:shortVersionString
+          # is the human-readable label shown in the update prompt.
+          item = (
+              '        <item>\n'
+              f'            <title>{version}</title>\n'
+              f'            <pubDate>{pubdate}</pubDate>\n'
+              f'            <sparkle:version>{build}</sparkle:version>\n'
+              f'            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>\n'
+              '            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>\n'
+              f'            <enclosure url="{url}" length="{length}" type="application/octet-stream" sparkle:edSignature="{sig}"/>\n'
+              '        </item>\n'
+          )
+
+          p = pathlib.Path('appcast.xml')
+          xml = p.read_text()
+          if f'<title>{version}</title>' in xml:
+              print(f'version {version} already in appcast, skipping')
+          else:
+              xml = xml.replace('    </channel>', item + '    </channel>')
+              p.write_text(xml)
+              print(f'appcast.xml updated with {version}')
+          PY
+
+          echo "--- updated appcast.xml ---"
+          cat appcast.xml
+
+          git config user.email actions@github.com
+          git config user.name github-actions
+          git add appcast.xml
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "appcast: publish ${TAG}"
+            git push origin gh-pages
+          fi
