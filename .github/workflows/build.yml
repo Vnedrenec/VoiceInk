@@ -179,17 +179,20 @@ jobs:
                - **Microphone** (запись голоса)
                - **Accessibility** (вставка в курсор)
                - **Input Monitoring** (глобальный шорткат)
+            5. **Перезапусти VoiceInk** после включения Input Monitoring — иначе шорткод не работает (event tap ставится только при старте).
 
             ## Будущие обновления
 
             Через меню VoiceInk → "Check for Updates..." — автоматически, **без предупреждений Gatekeeper**. Sparkle качает прямо из этого репо.
 
-            ## Что в форке
+            > После обновления разрешения macOS могут слететь (ad-hoc подпись) — пере-выдай Input Monitoring/Accessibility и перезапусти приложение.
 
-            - Убрано trial-сообщение в выводе расшифровки
-            - Отключены phone-home запросы (announcements, auto-update check к upstream)
-            - Auto-update перенаправлен на этот форк
-            - Все фичи upstream сохранены (Whisper/Parakeet локально, Power Mode, Enhancement, etc.)
+            ## Что это за сборка
+
+            - **Чистый код разработчика** ([Beingpax/VoiceInk](https://github.com/Beingpax/VoiceInk)) — ничего не вырезано и не пропатчено
+            - **Бесплатно**: собрано с `LOCAL_BUILD` → лицензия активна, без trial-сообщения
+            - **Auto-update** перенаправлен на этот форк (Sparkle тянет из этого репо)
+            - Все фичи upstream на месте (Whisper/Parakeet локально, Power Mode, Enhancement, etc.)
 
             Build SHA: `${{ steps.version.outputs.sha }}` · Tag: `${{ github.ref_name }}`
           files: |
