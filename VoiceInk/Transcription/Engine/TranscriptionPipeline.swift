@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import AppKit
 import os
 
 /// Handles the full post-recording pipeline:
@@ -224,6 +225,20 @@ class TranscriptionPipeline {
 
             let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
             let pastedText = textToPaste + (appendSpace ? " " : "")
+
+            // Restore focus to the app that was frontmost when recording started.
+            // Enhancement can take several seconds (cloud API), during which focus
+            // may drift away from the target app — causing Cmd+V to land in the
+            // wrong window. Re-activating the captured app fixes the "works every
+            // other time" behaviour, especially in Power Modes that use slower
+            // remote enhancement providers. Only re-activate when focus actually
+            // drifted, so we never steal focus when the target is already frontmost.
+            if let target = ActiveWindowService.shared.currentApplication,
+               target.processIdentifier != NSWorkspace.shared.frontmostApplication?.processIdentifier {
+                target.activate(options: .activateIgnoringOtherApps)
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+
             CursorPaster.startPasteAtCursor(pastedText)
             let autoSendKey = PowerModeManager.shared.currentActiveConfiguration?.autoSendKey
             SoundManager.shared.playStopSound()
