@@ -58,16 +58,33 @@ jobs:
           # numeric and supports 0..99 for each component.
           BUILD=$(echo "$VERSION" | awk -F. '{ printf "%d%02d%02d\n", $1, $2+0, $3+0 }')
 
-          # Replace only the VoiceInk app target's MARKETING_VERSION (current: 1.77).
-          # The test target has MARKETING_VERSION = 1.0 and is left alone.
-          sed -i '' "s|MARKETING_VERSION = 1\.77;|MARKETING_VERSION = ${VERSION};|g" "$PBX"
+          # Read the app target's CURRENT values instead of hardcoding them, so an
+          # upstream version bump (1.77 -> 2.1 -> ...) does not silently turn these
+          # sed calls into no-ops. The VoiceInk app target is the first occurrence in
+          # the pbxproj; the test targets use MARKETING_VERSION = 1.0 /
+          # CURRENT_PROJECT_VERSION = 1 and must be left alone.
+          CUR_MKT=$(grep -m1 -o 'MARKETING_VERSION = [^;]*;' "$PBX" | sed 's|MARKETING_VERSION = ||; s|;||')
+          CUR_BLD=$(grep -m1 -o 'CURRENT_PROJECT_VERSION = [^;]*;' "$PBX" | sed 's|CURRENT_PROJECT_VERSION = ||; s|;||')
+          echo "Detected app target versions: MARKETING_VERSION=${CUR_MKT}, CURRENT_PROJECT_VERSION=${CUR_BLD}"
 
-          # Replace the VoiceInk app target's CURRENT_PROJECT_VERSION (current: 177).
-          # The test target has CURRENT_PROJECT_VERSION = 1 and is left alone.
-          sed -i '' "s|CURRENT_PROJECT_VERSION = 177;|CURRENT_PROJECT_VERSION = ${BUILD};|g" "$PBX"
+          if [ -z "$CUR_MKT" ] || [ -z "$CUR_BLD" ]; then
+            echo "Could not read current versions from $PBX"; exit 1
+          fi
+          if [ "$CUR_MKT" = "1.0" ] || [ "$CUR_BLD" = "1" ]; then
+            echo "First match looks like a test target (${CUR_MKT}/${CUR_BLD}) — refusing to patch"; exit 1
+          fi
+
+          sed -i '' "s|MARKETING_VERSION = ${CUR_MKT};|MARKETING_VERSION = ${VERSION};|g" "$PBX"
+          sed -i '' "s|CURRENT_PROJECT_VERSION = ${CUR_BLD};|CURRENT_PROJECT_VERSION = ${BUILD};|g" "$PBX"
 
           echo "Patched MARKETING_VERSION -> ${VERSION}, CURRENT_PROJECT_VERSION -> ${BUILD}"
           grep -n "MARKETING_VERSION\|CURRENT_PROJECT_VERSION" "$PBX" | sort -u
+
+          # Fail loudly rather than shipping a build whose CFBundleVersion does not
+          # match the sparkle:version written into the appcast.
+          grep -q "MARKETING_VERSION = ${VERSION};" "$PBX" || { echo "MARKETING_VERSION patch did not apply"; exit 1; }
+          grep -q "CURRENT_PROJECT_VERSION = ${BUILD};" "$PBX" || { echo "CURRENT_PROJECT_VERSION patch did not apply"; exit 1; }
+
           echo "build=$BUILD" >> "$GITHUB_OUTPUT"
 
       - name: Point Sparkle to fork-hosted appcast and public key
@@ -214,11 +231,17 @@ jobs:
           URL="https://github.com/Vnedrenec/VoiceInk/releases/download/${TAG}/VoiceInk-${TAG}.zip"
           PUBDATE=$(date -R)
 
+          # Read the minimum OS from the app that was actually built, so an upstream
+          # deployment-target bump does not offer the update to Macs that cannot run it.
+          MINOS=$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" ~/Downloads/VoiceInk.app/Contents/Info.plist)
+          if [ -z "$MINOS" ]; then echo "Could not read LSMinimumSystemVersion"; exit 1; fi
+          echo "minimumSystemVersion for appcast: $MINOS"
+
           git clone --branch gh-pages --single-branch \
             "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/Vnedrenec/VoiceInk.git" gh-pages-checkout
           cd gh-pages-checkout
 
-          export URL PUBDATE
+          export URL PUBDATE MINOS
           /usr/bin/python3 - <<'PY'
           import os, pathlib
           version  = os.environ['VERSION']
@@ -227,6 +250,7 @@ jobs:
           length   = os.environ['LEN']
           url      = os.environ['URL']
           pubdate  = os.environ['PUBDATE']
+          minos    = os.environ['MINOS']
 
           # sparkle:version MUST match CFBundleVersion (build number, integer)
           # for Sparkle's comparator to detect updates. sparkle:shortVersionString
@@ -237,7 +261,7 @@ jobs:
               f'            <pubDate>{pubdate}</pubDate>\n'
               f'            <sparkle:version>{build}</sparkle:version>\n'
               f'            <sparkle:shortVersionString>{version}</sparkle:shortVersionString>\n'
-              '            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>\n'
+              f'            <sparkle:minimumSystemVersion>{minos}</sparkle:minimumSystemVersion>\n'
               f'            <enclosure url="{url}" length="{length}" type="application/octet-stream" sparkle:edSignature="{sig}"/>\n'
               '        </item>\n'
           )
