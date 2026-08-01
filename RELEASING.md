@@ -11,8 +11,11 @@
 
 ## Для друзей (установка + обновления)
 
-**Требования**: Apple Silicon (arm64), **macOS 15.0+** (начиная с v2.1 — upstream поднял
-deployment target с 14.4 до 15.0).
+**Требования**: Apple Silicon (arm64), **macOS 14.4+**.
+
+> Не путать: в `project.pbxproj` на уровне проекта стоит `MACOSX_DEPLOYMENT_TARGET = 15.0`,
+> но app-таргет перекрывает его на `14.4`. Реальный минимум = `LSMinimumSystemVersion`
+> собранного `.app`, откуда его и берёт `build.yml` для appcast.
 
 **Установка** — одна команда в Terminal:
 
