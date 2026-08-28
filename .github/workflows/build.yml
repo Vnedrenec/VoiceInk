@@ -193,6 +193,25 @@ jobs:
       - name: Build VoiceInk.app
         run: make local LOCAL_CODESIGN_IDENTITY=${{ steps.signing.outputs.identity }}
 
+      - name: Re-sign app with the stable certificate
+        env:
+          IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          # Xcode resolves CODE_SIGN_IDENTITY through its own identity search and
+          # silently falls back to "Sign to Run Locally" (codesign --sign -) for
+          # this certificate - even with it trusted as a code-signing root, with
+          # CODE_SIGNING_REQUIRED=YES, and after acknowledging the override
+          # ("note: Using codesigning identity override: ..."). Plain codesign
+          # has no such qualms, so re-sign the finished bundle rather than fight
+          # the build system. Only the app target carries entitlements; the
+          # embedded XPC service and frameworks have none, so --deep drops
+          # nothing. This is the copy that gets zipped and released.
+          APP=~/Downloads/VoiceInk.app
+          codesign --force --deep --timestamp=none \
+            --sign "$IDENTITY" \
+            --entitlements VoiceInk/VoiceInk.local.entitlements \
+            "$APP"
+
       - name: Verify built app
         run: |
           APP=~/Downloads/VoiceInk.app
