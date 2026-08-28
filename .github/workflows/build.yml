@@ -16,22 +16,40 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode with Swift 6.2+
+      - name: Select Xcode with Swift 6.3+
         run: |
-          # LLMkit requires Swift 6.2 -> need Xcode 26.x
-          for candidate in /Applications/Xcode_26*.app /Applications/Xcode.app; do
-            if [ -d "$candidate" ]; then
-              sudo xcode-select -s "$candidate"
+          # LLMkit needs Swift 6.2, and mlx-swift 0.31.5+ declares
+          # `swift-tools-version: 6.3`. With an older toolchain SPM silently
+          # skips those versions, ignores the 0.31.6 pin in Package.resolved and
+          # resolves mlx-swift 0.31.4, which then fails to compile mlx-swift-lm:
+          #   error: type 'MLXArray' has no member 'maskFill'
+          # So pick the newest Xcode whose Swift is >= 6.3 instead of the first
+          # 26.x the glob happens to return (that was 26.0.1 = Swift 6.2).
+          REQUIRED=6.3
+          SELECTED=""
+          for candidate in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+            SWIFT="$candidate/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift"
+            [ -x "$SWIFT" ] || continue
+            VER=$("$SWIFT" --version 2>/dev/null | sed -n 's/.*Apple Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)
+            echo "$candidate -> Swift ${VER:-unknown}"
+            [ -n "$VER" ] || continue
+            if [ "$(printf '%s\n%s\n' "$REQUIRED" "$VER" | sort -V | head -1)" = "$REQUIRED" ]; then
+              SELECTED="$candidate"
               break
             fi
           done
+          if [ -z "$SELECTED" ]; then
+            echo "No Xcode with Swift >= $REQUIRED found on this runner"; exit 1
+          fi
+          echo "Selected $SELECTED"
+          sudo xcode-select -s "$SELECTED"
           xcodebuild -version
           swift --version
           xcode-select -p
