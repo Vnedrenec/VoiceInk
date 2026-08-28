@@ -20,5 +20,13 @@
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
             <enclosure url="https://github.com/Vnedrenec/VoiceInk/releases/download/v2.1/VoiceInk-v2.1.zip" length="30810681" type="application/octet-stream" sparkle:edSignature="jNAqV5ph7cyRwDCOKVUop1tt0PINh4jwoC1KrlMITPNTx5yxf/tWCJguqQz916e71dJ8g6c/z4lNgBDsdo4rCA=="/>
         </item>
+        <item>
+            <title>2.13</title>
+            <pubDate>Fri, 28 Aug 2026 20:18:57 +0000</pubDate>
+            <sparkle:version>21300</sparkle:version>
+            <sparkle:shortVersionString>2.13</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/Vnedrenec/VoiceInk/releases/download/v2.13/VoiceInk-v2.13.zip" length="58622932" type="application/octet-stream" sparkle:edSignature="ZCRa0y6wNVPPnIJS6oLzstQXuBbRRYqAQnNhP4lVNyb7WROGzshDUxkLkyORVi4RK0lnGFZcrv1y8oOfVmGhDw=="/>
+        </item>
     </channel>
 </rss>
