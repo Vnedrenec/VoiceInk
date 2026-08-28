@@ -74,6 +74,29 @@ enum TranscriptionModelRegistry {
                 supportedLanguages: LanguageDictionary.nemotronMultilingual
             ),
 
+            TranscribeCppModel(
+                name: "cohere-transcribe",
+                displayName: "Cohere Transcribe",
+                description: "Accurate multilingual transcription that runs privately on your Mac",
+                size: "1.56 GB",
+                speed: 0.75,
+                accuracy: 0.95,
+                ramUsage: 2.5,
+                publisher: "Cohere",
+                supportedLanguages: LanguageDictionary.cohereTranscribe
+            ),
+            TranscribeCppModel(
+                name: "sensevoice-small",
+                displayName: "SenseVoice Small",
+                description: "Fast CJK and English transcription that runs privately on your Mac",
+                size: "241 MB",
+                speed: 0.99,
+                accuracy: 0.92,
+                ramUsage: 0.5,
+                publisher: "FunAudioLLM / Alibaba",
+                supportedLanguages: LanguageDictionary.senseVoiceSmall
+            ),
+
             // Local Models
             WhisperModel(
                 name: "ggml-tiny",

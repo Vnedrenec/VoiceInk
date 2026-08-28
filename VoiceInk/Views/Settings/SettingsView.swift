@@ -1,6 +1,5 @@
 import Carbon.HIToolbox
 import Cocoa
-import LaunchAtLogin
 import SwiftUI
 
 struct SettingsView: View {
@@ -11,6 +10,7 @@ struct SettingsView: View {
     @EnvironmentObject private var recorderUIManager: RecorderUIManager
     @EnvironmentObject private var transcriptionModelManager: TranscriptionModelManager
     @EnvironmentObject private var enhancementService: AIEnhancementService
+    @ObservedObject private var launchAtLoginManager = LaunchAtLoginManager.shared
     @ObservedObject private var mediaController = MediaController.shared
     @ObservedObject private var playbackController = PlaybackController.shared
     @AppStorage("hasCompletedOnboardingV2") private var hasCompletedOnboardingV2 = true
@@ -25,7 +25,6 @@ struct SettingsView: View {
     @AppStorage(RecorderDisplaySettingsKeys.showLiveTranscript) private var showLiveTranscript = true
     @State private var showResetOnboardingAlert = false
     @State private var showLanguageRestartAlert = false
-    @State private var hasCancelRecordingShortcut = ShortcutStore.shortcut(for: .cancelRecorder) != nil
     @State private var cancelRecordingShortcutRecorderResetID = 0
 
     @State private var isMiddleClickExpanded = false
@@ -98,20 +97,18 @@ struct SettingsView: View {
                     .controlSize(.small)
                 }
 
-                LabeledContent("Cancel Recording") {
+                LabeledContent {
                     HStack(spacing: 8) {
                         ShortcutRecorder(
                             action: .cancelRecorder,
                             defaultShortcut: Self.defaultCancelRecordingShortcut
-                        ) {
-                            hasCancelRecordingShortcut = true
-                        }
+                        )
                         .id(cancelRecordingShortcutRecorderResetID)
                         .controlSize(.small)
 
                         Button {
+                            RecorderPanelShortcutManager.resetEscapeConfirmationHint()
                             ShortcutStore.setShortcut(nil, for: .cancelRecorder)
-                            hasCancelRecordingShortcut = false
                             cancelRecordingShortcutRecorderResetID += 1
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
@@ -119,10 +116,13 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .help("Reset to default")
                     }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: ShortcutStore.shortcutDidChange)) { notification in
-                    guard let action = notification.object as? ShortcutAction, action == .cancelRecorder else { return }
-                    hasCancelRecordingShortcut = ShortcutStore.shortcut(for: .cancelRecorder) != nil
+                } label: {
+                    HStack(spacing: 2) {
+                        Text("Cancel Recording")
+                        InfoTip(
+                            "The assigned shortcut cancels the recording. Resetting restores the default double-Escape behavior."
+                        )
+                    }
                 }
 
                 ExpandableSettingsRow(
@@ -236,13 +236,20 @@ struct SettingsView: View {
             Section("General") {
                 Toggle("Hide Dock Icon", isOn: $menuBarManager.isMenuBarOnly)
 
-                LaunchAtLogin.Toggle(String(localized: "Launch at Login"))
+                Toggle(
+                    String(localized: "Launch at Login"),
+                    isOn: Binding(
+                        get: { launchAtLoginManager.isEnabled },
+                        set: { launchAtLoginManager.setEnabled($0) }
+                    )
+                )
+                .disabled(launchAtLoginManager.isUpdating)
 
                 Toggle(
-                    "Auto-check Updates",
+                    "Automatically Check for Updates",
                     isOn: Binding(
-                        get: { updaterViewModel.automaticallyChecksForUpdates },
-                        set: { updaterViewModel.setAutomaticallyChecksForUpdates($0) }
+                        get: { updaterViewModel.checksForUpdatesWhenDashboardAppears },
+                        set: { updaterViewModel.setChecksForUpdatesWhenDashboardAppears($0) }
                     ))
 
                 Toggle("Show Announcements", isOn: $enableAnnouncements)
@@ -269,15 +276,17 @@ struct SettingsView: View {
             Section {
                 LabeledContent("Export Settings") {
                     Button("Export") {
-                        ImportExportService.shared.exportSettings(
-                            enhancementService: enhancementService,
-                            recordingShortcutManager: recordingShortcutManager,
-                            menuBarManager: menuBarManager,
-                            mediaController: mediaController,
-                            playbackController: playbackController,
-                            recorderUIManager: recorderUIManager,
-                            modelContext: modelContext
-                        )
+                        Task {
+                            await ImportExportService.shared.exportSettings(
+                                enhancementService: enhancementService,
+                                recordingShortcutManager: recordingShortcutManager,
+                                menuBarManager: menuBarManager,
+                                mediaController: mediaController,
+                                playbackController: playbackController,
+                                recorderUIManager: recorderUIManager,
+                                modelContext: modelContext
+                            )
+                        }
                     }
                 }
 

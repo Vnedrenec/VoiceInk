@@ -70,6 +70,7 @@ struct ModeConfigFormView: View {
             footer
         }
         .onAppear {
+            applyVoiceInkRefineRulesIfNeeded()
             applyOutputRules()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                 isNameFieldFocused = true
@@ -215,11 +216,7 @@ struct ModeConfigFormView: View {
                         let model = warmupSnapshot.transcriptionModel(named: modelName)
                     {
                         draft.isRealtimeTranscriptionEnabled = TranscriptionRealtimeSupport.isAvailable(for: model)
-                        if model.provider == .gemini {
-                            draft.selectedLanguage = "auto"
-                        } else {
-                            draft.useCompatibleLanguage(for: model)
-                        }
+                        draft.useCompatibleLanguage(for: model)
                     }
                 }
 
@@ -262,15 +259,7 @@ struct ModeConfigFormView: View {
 
     @ViewBuilder
     private var languagePicker: some View {
-        if languageSelectionDisabled() {
-            LabeledContent("Language") {
-                Text("Autodetected")
-                    .foregroundColor(.secondary)
-            }
-            .onAppear {
-                draft.selectedLanguage = "auto"
-            }
-        } else if let selectedModel = effectiveModelName,
+        if let selectedModel = effectiveModelName,
             let modelInfo = warmupSnapshot.transcriptionModel(named: selectedModel),
             modelInfo.isMultilingualModel
         {
@@ -340,7 +329,9 @@ struct ModeConfigFormView: View {
                         {
                             draft.selectedAIModel = warmupSnapshot.selectedModel(for: provider)
                         }
-                        if draft.selectedPromptId == nil {
+                        if configuredSelectedAIProvider != .voiceInkRefine,
+                            draft.selectedPromptId == nil
+                        {
                             draft.selectedPromptId = warmupSnapshot.firstPromptId
                         }
                         if configuredSelectedAIProvider == .ollama {
@@ -379,6 +370,8 @@ struct ModeConfigFormView: View {
                             switch provider {
                             case .localCLI:
                                 draft.selectedAIModel = nil
+                            case .voiceInkRefine:
+                                applyVoiceInkRefineRules()
                             case .ollama:
                                 if draft.selectedAIModel == nil || draft.selectedAIModel?.isEmpty == true {
                                     draft.selectedAIModel = warmupSnapshot.selectedModel(for: provider)
@@ -387,14 +380,22 @@ struct ModeConfigFormView: View {
                             default:
                                 draft.selectedAIModel = provider.defaultModel
                             }
+
+                            if provider != .voiceInkRefine,
+                                draft.selectedPromptId == nil
+                            {
+                                draft.selectedPromptId = warmupSnapshot.firstPromptId
+                            }
                         }
                     }
                 }
 
                 if let provider = configuredSelectedAIProvider {
                     aiModelPicker(for: provider)
-                    promptPicker
-                    contextAwarenessRow
+                    if provider != .voiceInkRefine {
+                        promptPicker
+                        contextAwarenessRow
+                    }
                 }
             }
         }
@@ -409,6 +410,14 @@ struct ModeConfigFormView: View {
             }
             .onAppear {
                 draft.selectedAIModel = nil
+            }
+        } else if provider == .voiceInkRefine {
+            LabeledContent("AI Model") {
+                Text(VoiceInkRefineService.modelName)
+                    .foregroundColor(.secondary)
+            }
+            .onAppear {
+                applyVoiceInkRefineRules()
             }
         } else {
             let models = aiModelOptions(for: provider)
@@ -544,11 +553,24 @@ struct ModeConfigFormView: View {
     }
 
     private var canRespond: Bool {
-        draft.isAIEnhancementEnabled && selectedPrompt != nil && configuredSelectedAIProvider != nil
+        draft.isAIEnhancementEnabled
+            && selectedPrompt != nil
+            && configuredSelectedAIProvider != nil
+            && configuredSelectedAIProvider != .voiceInkRefine
     }
 
     private func applyOutputRules() {
         draft.applyOutputRules(canRespond: canRespond)
+    }
+
+    private func applyVoiceInkRefineRulesIfNeeded() {
+        guard configuredSelectedAIProvider == .voiceInkRefine else { return }
+        applyVoiceInkRefineRules()
+    }
+
+    private func applyVoiceInkRefineRules() {
+        draft.selectedAIModel = VoiceInkRefineService.modelName
+        applyOutputRules()
     }
 
     private var advancedSection: some View {
@@ -665,13 +687,6 @@ struct ModeConfigFormView: View {
             .padding(.horizontal, 20)
             .padding(.vertical, 16)
         }
-    }
-
-    private func languageSelectionDisabled() -> Bool {
-        guard let selectedModelName = effectiveModelName,
-            let model = warmupSnapshot.transcriptionModel(named: selectedModelName)
-        else { return false }
-        return model.provider == .gemini
     }
 
     private func availableLanguages(for model: any TranscriptionModel) -> [String: String] {

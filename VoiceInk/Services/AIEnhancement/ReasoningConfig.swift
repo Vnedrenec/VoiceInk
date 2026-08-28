@@ -2,17 +2,18 @@ import Foundation
 import LLMkit
 
 struct ReasoningConfig {
+    // Gemini 3.7 Flash and 3.1 Pro Preview do not support "minimal".
+    static let geminiLowThinkingModels: Set<String> = [
+        "gemini-3.7-flash",
+        "gemini-3.1-pro-preview",
+    ]
+
     // These models support "minimal", optimized for low-latency instruction following.
     static let geminiMinimalThinkingModels: Set<String> = [
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
         "gemini-3.1-flash-lite",
-    ]
-
-    // Gemini 3.1 Pro does not support "minimal".
-    static let geminiLowThinkingModels: Set<String> = [
-        "gemini-3.1-pro-preview",
     ]
 
     // Gemini 2.5 Flash-Lite is intentionally omitted because its Interactions
@@ -29,6 +30,9 @@ struct ReasoningConfig {
 
     // OpenAI GPT-5 models support explicit "none"; GPT-4.1 models need no param.
     static let openAINoneReasoningModels: Set<String> = [
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol",
         "gpt-5.5",
         "gpt-5.4",
         "gpt-5.4-mini",
