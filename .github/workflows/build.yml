@@ -172,13 +172,18 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           rm -f "$P12"
 
-          # The certificate is self-signed, so the system does not trust it
-          # (CSSMERR_TP_NOT_TRUSTED) and `find-identity -v` hides it. codesign
-          # signs with it regardless, which is all TCC needs - list every
-          # identity rather than only the "valid" ones.
-          HASH=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/VoiceInk Fork Signing/ { print $2; exit }')
+          # Mark the certificate as a trusted code-signing root. Plain codesign
+          # would sign with an untrusted self-signed cert just fine, but Xcode's
+          # build system only picks identities the system considers valid and
+          # otherwise falls back to "Sign to Run Locally" (ad-hoc) without
+          # failing the build - which silently defeats the whole point here.
+          CER="$RUNNER_TEMP/signing-cert.pem"
+          security find-certificate -c "VoiceInk Fork Signing" -p "$KEYCHAIN" > "$CER"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$CER"
+
+          HASH=$(security find-identity -v -p codesigning "$KEYCHAIN" | awk '/VoiceInk Fork Signing/ { print $2; exit }')
           if [ -z "$HASH" ]; then
-            echo "Signing identity not found in keychain"
+            echo "No valid signing identity - Xcode would silently fall back to ad-hoc"
             security find-identity -p codesigning "$KEYCHAIN"
             exit 1
           fi
