@@ -109,14 +109,72 @@ jobs:
         if: steps.cache-whisper.outputs.cache-hit != 'true'
         run: make whisper
 
+      - name: Import code signing certificate
+        id: signing
+        env:
+          CERT_P12_BASE64: ${{ secrets.MACOS_SIGN_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.MACOS_SIGN_CERT_PASSWORD }}
+        run: |
+          # Stable self-signed identity. macOS TCC keys Input Monitoring /
+          # Accessibility / Screen Recording grants to the app's designated
+          # requirement. An ad-hoc signature bakes the cdhash into that
+          # requirement, so every CI build looked like a different app and users
+          # had to re-grant permissions after each update (F13 silently dead,
+          # because ShortcutMonitor only preflights the event tap at launch).
+          # Signing with a fixed certificate yields
+          #   identifier "com.prakashjoshipax.VoiceInk" and certificate root = H"<cert sha1>"
+          # which is identical across builds, so the grants survive updates.
+          if [ -z "$CERT_P12_BASE64" ]; then
+            echo "MACOS_SIGN_CERT_P12 secret is missing - refusing to fall back to ad-hoc signing"; exit 1
+          fi
+
+          KEYCHAIN="$RUNNER_TEMP/voiceink-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 24)
+          P12="$RUNNER_TEMP/signing.p12"
+
+          printf '%s' "$CERT_P12_BASE64" | base64 --decode > "$P12"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$P12"
+
+          # The certificate is self-signed, so the system does not trust it
+          # (CSSMERR_TP_NOT_TRUSTED) and `find-identity -v` hides it. codesign
+          # signs with it regardless, which is all TCC needs - list every
+          # identity rather than only the "valid" ones.
+          HASH=$(security find-identity -p codesigning "$KEYCHAIN" | awk '/VoiceInk Fork Signing/ { print $2; exit }')
+          if [ -z "$HASH" ]; then
+            echo "Signing identity not found in keychain"
+            security find-identity -p codesigning "$KEYCHAIN"
+            exit 1
+          fi
+          echo "Using signing identity $HASH"
+          echo "identity=$HASH" >> "$GITHUB_OUTPUT"
+
       - name: Build VoiceInk.app
-        run: make local
+        run: make local LOCAL_CODESIGN_IDENTITY=${{ steps.signing.outputs.identity }}
 
       - name: Verify built app
         run: |
           APP=~/Downloads/VoiceInk.app
           if [ ! -d "$APP" ]; then echo "App not found"; exit 1; fi
           codesign -dvv "$APP" 2>&1 | head -10
+
+          # Guard the whole point of the signing step: an ad-hoc signature here
+          # means every user has to re-grant macOS permissions after updating.
+          if codesign -dvv "$APP" 2>&1 | grep -q "Signature=adhoc"; then
+            echo "App is ad-hoc signed - permission grants would break on every update"; exit 1
+          fi
+          echo "--- designated requirement ---"
+          codesign -d -r- "$APP"
+          codesign -d -r- "$APP" 2>&1 | grep -q "certificate root" || {
+            echo "Designated requirement is not pinned to the signing certificate"; exit 1; }
+          codesign --verify --strict "$APP" || { echo "Signature verification failed"; exit 1; }
+
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
 
       - name: Determine version
