@@ -227,7 +227,7 @@ jobs:
           codesign -d -r- "$APP"
           codesign -d -r- "$APP" 2>&1 | grep -q "certificate root" || {
             echo "Designated requirement is not pinned to the signing certificate"; exit 1; }
-          codesign --verify --strict "$APP" || { echo "Signature verification failed"; exit 1; }
+          codesign --verify --deep --strict "$APP" || { echo "Signature verification failed"; exit 1; }
 
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Contents/Info.plist"
 
@@ -302,8 +302,10 @@ jobs:
 
             1. Скачай `VoiceInk-${{ steps.version.outputs.tag }}.zip` ниже
             2. Распакуй и перетащи `VoiceInk.app` в `/Applications`
-            3. **Ctrl+Click** на `VoiceInk.app` → **Open** → подтверди
-               (macOS покажет предупреждение про "невозможно подтвердить" — это потому что подпись ad-hoc, а не Apple Developer ID. Код открыт, проверяемо: [исходники](https://github.com/Vnedrenec/VoiceInk), [сборка в Actions](https://github.com/Vnedrenec/VoiceInk/actions))
+            3. Запусти `VoiceInk.app` → macOS скажет "невозможно проверить" → открой
+               **System Settings → Privacy & Security**, найди сообщение про VoiceInk внизу
+               и нажми **Open Anyway** (на macOS 15+ старый трюк Ctrl+Click → Open больше не работает)
+               (Предупреждение — потому что сборка подписана собственным (self-signed) сертификатом, а не Apple Developer ID: нотаризация требует платного аккаунта. Код открыт, проверяемо: [исходники](https://github.com/Vnedrenec/VoiceInk), [сборка в Actions](https://github.com/Vnedrenec/VoiceInk/actions))
             4. Выдай разрешения в System Settings → Privacy & Security:
                - **Microphone** (запись голоса)
                - **Accessibility** (вставка в курсор)
@@ -314,7 +316,7 @@ jobs:
 
             Через меню VoiceInk → "Check for Updates..." — автоматически, **без предупреждений Gatekeeper**. Sparkle качает прямо из этого репо.
 
-            > После обновления разрешения macOS могут слететь (ad-hoc подпись) — пере-выдай Input Monitoring/Accessibility и перезапусти приложение.
+            > **Один раз при переходе с v2.1 и старее** разрешения macOS слетят: раньше сборки были ad-hoc-подписаны, и система считала каждое обновление новым приложением. Теперь подпись стабильная — пере-выдай Input Monitoring/Accessibility, перезапусти приложение, и дальше разрешения будут переживать обновления.
 
             ## Что это за сборка
 
