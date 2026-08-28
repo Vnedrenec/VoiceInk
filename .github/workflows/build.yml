@@ -109,6 +109,18 @@ jobs:
         if: steps.cache-whisper.outputs.cache-hit != 'true'
         run: make whisper
 
+      - name: Trust Swift macros from package dependencies
+        run: |
+          # 2.13 pulls mlx-swift-lm, whose Swift macro target Xcode refuses to
+          # run until a human clicks "Trust & Enable" in the IDE:
+          #   error: Macro "MLXHuggingFaceMacros" from package "mlx-swift-lm"
+          #   must be enabled before it can be used
+          # There is no such prompt on a runner, so opt out of fingerprint
+          # validation for macros and package plugins. (The second key's
+          # doubled "at" is Apple's own typo in the preference name.)
+          defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+          defaults write com.apple.dt.Xcode IDESkipPackagePluginFingerprintValidatation -bool YES
+
       - name: Import code signing certificate
         id: signing
         env:
