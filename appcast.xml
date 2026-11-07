@@ -3,25 +3,29 @@
     <channel>
         <title>VoiceInk</title>
         <item>
-            <title>2.20</title>
-            <pubDate>Sat, 19 Sep 2026 17:52:18 +0545</pubDate>
-            <sparkle:version>220</sparkle:version>
-            <sparkle:shortVersionString>2.20</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <description><![CDATA[<h3>What's New in VoiceInk 2.20</h3>
+            <title>2.25</title>
+            <pubDate>Tue, 03 Nov 2026 23:05:19 +0545</pubDate>
+            <sparkle:version>225</sparkle:version>
+            <sparkle:shortVersionString>2.25</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description><![CDATA[<h3>What's New in VoiceInk 2.25</h3>
 <ul>
-  <li>🧠 Introduced the Dictionary Auto Learn feature</li>
-  <li>📦 Support for importing and exporting dictionaries</li>
-  <li>🕘 Faster access to recent transcriptions with Quick History</li>
-  <li>🖱️ Added support for mouse shortcuts</li>
-  <li>🗣️ Added support for Grok Voice Transcribe 2.0</li>
-  <li>🤖 Added support for Gemini 3.8 Flash and Qwen 3.8 27B enhancement models</li>
-  <li>🌍 Support for French localization</li>
-  <li>⚡ Improved OpenRouter performance and stability</li>
+  <li>✨ Added Smart Punctuation</li>
+  <li>🧠 Improved Dictionary Auto Learning</li>
+  <li>⌨️ Added Direct Typing and Remote Desktop Typing support as a Paste Method</li>
+  <li>↩️ Restored per-mode Auto Send</li>
+  <li>🗣️ Added support for Mistral Voxtral 3 transcription models</li>
+  <li>☁️ Added support for Soniox V6, AssemblyAI Universal 3.6 Pro, and ElevenLabs Scribe V2 Medical</li>
+  <li>⚙️ Support for custom enhancement model names</li>
+  <li>📋 Improved context awareness</li>
+  <li>🔄 Improved recording shortcut recovery</li>
+  <li>📋 Improved paste reliability and clipboard restoration</li>
+  <li>🌐 Improved website mode triggers</li>
+  <li>🌍 Added Japanese localization</li>
   <li>🛠️ Minor bug fixes and improvements</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/Beingpax/VoiceInk/releases/download/v2.20/VoiceInk.dmg" length="50395303" type="application/octet-stream" sparkle:edSignature="4jrUeMTntgAvIkxuJrNy9a53K3+e+UXXMxD+pAv2uxLlG+bmImBIZ3+bRBxG3GcI4SoRHw80bXguDKtMnHnqBg=="/>
+            <enclosure url="https://github.com/Beingpax/VoiceInk/releases/download/v2.25/VoiceInk.dmg" length="51378202" type="application/octet-stream" sparkle:edSignature="k1dsYo6A8CvwjdEc/Z+TdPBQQGQpRUKyM5/K86di9Z1ID7NbaaF4FLi5XnGLwUW89mVb+wuqdEsyShKGjG/YBg=="/>
         </item>
     </channel>
 </rss>

@@ -13,7 +13,6 @@ struct DashboardContent: View {
     private static let displayNameHorizontalPadding: CGFloat = 8
     private static let insightsUnlockDuration: TimeInterval = 30 * 60
     private static let peakHoursUnlockDuration: TimeInterval = 30 * 60
-    private static let reviewBacklogActionThreshold = 50
     // Above this count, skip live auto-refresh (full reload is expensive); tab reopen still refreshes.
     private static let automaticStatsRefreshMetricLimit = 2_000
     private static let statsRefreshDebounceNanoseconds: UInt64 = 750_000_000
@@ -29,15 +28,9 @@ struct DashboardContent: View {
     @State private var dashboardStatsLoadGeneration = 0
     @State private var isModelPerformancePanelPresented = false
     @State private var isModelUsagePanelPresented = false
-    @State private var isAutoLearnFailurePanelPresented = false
-    @State private var isAutoLearnReviewPanelPresented = false
-    @State private var autoLearnReviewBacklogCount = 0
-    @State private var autoLearnBacklogRefreshGeneration = 0
-    @State private var autoLearnFailurePresentationTask: Task<Void, Never>?
     @State private var isInsightsViewPresented = false
     @State private var selectedInsightPeriod: DashboardInsightPeriod = .allTime
     @State private var isAccessibilityEnabled = AXIsProcessTrusted()
-    @EnvironmentObject private var updaterViewModel: UpdaterViewModel
     @ObservedObject private var modeManager = ModeManager.shared
     @ObservedObject private var starPrompt = GitHubStarPromptCoordinator.shared
     @State private var isSystemInfoCopied = false
@@ -46,7 +39,6 @@ struct DashboardContent: View {
     @AppStorage("dashboardDisplayName") private var dashboardDisplayName: String = ""
     @AppStorage(AutoLearnSettings.isEnabledKey) private var isAutoLearnEnabled = true
     @AppStorage(AutoLearnSettings.hasFailureKey) private var hasAutoLearnFailure = false
-    @AppStorage(AutoLearnSettings.failureAcknowledgedKey) private var isAutoLearnFailureAcknowledged = false
     @FocusState private var isNameFieldFocused: Bool
     @Query(Self.recentTranscriptionsDescriptor()) private var recentTranscriptionCandidates: [Transcription]
 
@@ -108,29 +100,8 @@ struct DashboardContent: View {
         .task {
             scheduleDashboardStatsRefresh(allowSkipWhenFresh: hasLoadedStatsSnapshot)
         }
-        .task {
-            await refreshAutoLearnReviewBacklogCount()
-        }
         .onAppear {
             refreshAccessibilityStatus()
-            updaterViewModel.checkForUpdatesIfDue()
-            if shouldAutomaticallyPresentAutoLearnFailure {
-                scheduleAutoLearnFailurePresentation()
-            }
-        }
-        .onChange(of: hasAutoLearnFailure) { _, _ in
-            updateAutoLearnFailurePresentation()
-        }
-        .onChange(of: isAutoLearnEnabled) { _, _ in
-            updateAutoLearnFailurePresentation()
-        }
-        .onChange(of: isAutoLearnFailureAcknowledged) { _, _ in
-            updateAutoLearnFailurePresentation()
-        }
-        .onChange(of: isAutoLearnFailurePanelPresented) { wasPresented, isPresented in
-            if wasPresented, !isPresented, hasAutoLearnFailure, isAutoLearnEnabled {
-                AutoLearnSettings.acknowledgeCurrentFailure()
-            }
         }
         .onReceive(LifecycleObserver.shared.publisher(for: .applicationDidBecomeActive)) { _ in
             refreshAccessibilityStatus()
@@ -142,21 +113,11 @@ struct DashboardContent: View {
                 scheduleDashboardStatsRefresh(debounce: true, allowSkipWhenFresh: false)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .autoLearnQueueDidChange)) { _ in
-            scheduleAutoLearnReviewBacklogRefresh()
-        }
-        .onReceive(
-            NotificationCenter.default.publisher(for: .autoLearnReviewProposalsDidChange)
-        ) { _ in
-            scheduleAutoLearnReviewBacklogRefresh()
-        }
         .onDisappear {
             dashboardStatsTask?.cancel()
             dashboardStatsTask = nil
             dashboardStatsLoadGeneration += 1
             isDashboardStatsRefreshing = false
-            autoLearnFailurePresentationTask?.cancel()
-            autoLearnFailurePresentationTask = nil
         }
         .sidePanel(isPresented: $isModelPerformancePanelPresented) {
             ModelPerformancePanel(
@@ -172,63 +133,6 @@ struct DashboardContent: View {
                 isModelUsagePanelPresented = false
             }
         }
-        .sidePanel(isPresented: $isAutoLearnFailurePanelPresented) {
-            AutoLearnFailurePanel {
-                isAutoLearnFailurePanelPresented = false
-            }
-        }
-        .sidePanel(isPresented: $isAutoLearnReviewPanelPresented) {
-            AutoLearnReviewPanel {
-                isAutoLearnReviewPanelPresented = false
-            }
-        }
-    }
-
-    private func scheduleAutoLearnFailurePresentation() {
-        autoLearnFailurePresentationTask?.cancel()
-        autoLearnFailurePresentationTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
-            guard !Task.isCancelled, shouldAutomaticallyPresentAutoLearnFailure else { return }
-            isAutoLearnFailurePanelPresented = true
-            autoLearnFailurePresentationTask = nil
-        }
-    }
-
-    private var shouldAutomaticallyPresentAutoLearnFailure: Bool {
-        hasAutoLearnFailure && isAutoLearnEnabled && !isAutoLearnFailureAcknowledged
-    }
-
-    private var dashboardReviewCorrectionCount: Int? {
-        guard isAutoLearnEnabled,
-            autoLearnReviewBacklogCount > Self.reviewBacklogActionThreshold
-        else {
-            return nil
-        }
-        return autoLearnReviewBacklogCount
-    }
-
-    @MainActor
-    private func refreshAutoLearnReviewBacklogCount() async {
-        let generation = autoLearnBacklogRefreshGeneration
-        let queuedCount = (try? await AutoLearnService.shared.outstandingReviewCount()) ?? 0
-        let proposalCount = (try? await AutoLearnService.shared.reviewProposalCount()) ?? 0
-        guard generation == autoLearnBacklogRefreshGeneration else { return }
-        autoLearnReviewBacklogCount = queuedCount + proposalCount
-    }
-
-    private func scheduleAutoLearnReviewBacklogRefresh() {
-        autoLearnBacklogRefreshGeneration += 1
-        Task { await refreshAutoLearnReviewBacklogCount() }
-    }
-
-    private func updateAutoLearnFailurePresentation() {
-        if shouldAutomaticallyPresentAutoLearnFailure {
-            scheduleAutoLearnFailurePresentation()
-        } else {
-            autoLearnFailurePresentationTask?.cancel()
-            autoLearnFailurePresentationTask = nil
-            isAutoLearnFailurePanelPresented = false
-        }
     }
 
     private func dashboardMainContent(availableWidth: CGFloat) -> some View {
@@ -239,6 +143,15 @@ struct DashboardContent: View {
 
             nameEditorDismissArea {
                 heroSection
+            }
+
+            if hasAutoLearnFailure, isAutoLearnEnabled {
+                Button {
+                    MainWindowNavigation.shared.openDictionarySettings()
+                } label: {
+                    Label("Auto-Learn needs attention. Open Dictionary Settings.", systemImage: "exclamationmark.triangle")
+                }
+                .buttonStyle(.link)
             }
 
             if !isAccessibilityEnabled {
@@ -479,10 +392,6 @@ struct DashboardContent: View {
         isModelUsagePanelPresented = true
     }
 
-    private func openAutoLearnReviewPanel() {
-        isAutoLearnReviewPanelPresented = true
-    }
-
     @MainActor
     private func scheduleDashboardStatsRefresh(
         debounce: Bool = false,
@@ -636,9 +545,7 @@ struct DashboardContent: View {
             canViewInsights: canViewInsights,
             actionHelp: insightsActionHelp,
             actionAccessibilityLabel: insightsActionAccessibilityLabel,
-            reviewCorrectionCount: dashboardReviewCorrectionCount,
-            onViewInsights: openInsightsIfAvailable,
-            onReviewCorrections: openAutoLearnReviewPanel
+            onViewInsights: openInsightsIfAvailable
         )
     }
 
@@ -670,29 +577,6 @@ struct DashboardContent: View {
                 .animation(.easeInOut(duration: 0.15), value: starPrompt.openFailed)
             }
 
-            if let availableUpdate = updaterViewModel.availableUpdate {
-                Button(action: updaterViewModel.checkForUpdates) {
-                    footerActionLabel(
-                        icon: "arrow.down.circle.fill",
-                        title: "Update Available",
-                        color: AppTheme.Status.infoStrong
-                    )
-                }
-                .buttonStyle(.plain)
-                .fixedSize(horizontal: true, vertical: true)
-                .disabled(!updaterViewModel.canCheckForUpdates)
-                .help(
-                    String(
-                        format: String(localized: "Open the VoiceInk %@ update"),
-                        availableUpdate.displayVersion
-                    )
-                )
-                .accessibilityLabel("Update Available")
-                .accessibilityValue(Text(verbatim: availableUpdate.displayVersion))
-                .accessibilityHint("Opens the update window")
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
-
             Button(action: copySystemInfo) {
                 footerActionLabel(
                     icon: isSystemInfoCopied ? "checkmark" : "doc.on.doc",
@@ -704,7 +588,6 @@ struct DashboardContent: View {
             .fixedSize(horizontal: true, vertical: true)
             .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isSystemInfoCopied)
         }
-        .animation(.easeOut(duration: 0.2), value: updaterViewModel.availableUpdate)
     }
 
     @ViewBuilder
